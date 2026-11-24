@@ -254,9 +254,13 @@
     const privacy = $('#privacy-dialog');
     privacy.querySelectorAll('p')[1].textContent = 'Al enviar el formulario, tus datos se transmiten a EffiTech AI para atender tu solicitud. Puedes solicitar información sobre su tratamiento en nuestro correo de contacto.';
   }
-  $$('[data-plan]').forEach(link => link.addEventListener('click', () => {
+  $$('[data-plan]').forEach(link => link.addEventListener('click', event => {
+    event.preventDefault();
     selectedPlan = link.dataset.plan;
     track('plan_select', { plan: selectedPlan });
+    const intake = $('#plan-intake-dialog'), planField = intake && intake.querySelector('[name="plan"]');
+    if (planField) planField.value = selectedPlan;
+    if (intake && typeof intake.showModal === 'function') intake.showModal();
   }));
   function validateField(input) {
     const value = input.value.trim();
@@ -304,6 +308,22 @@
     track('audit_channel_open', { channel: id });
     $('#copy-status').textContent = 'Completa el envío en el servicio que abriste. Esta página no puede confirmar su recepción.';
   }));
+  const planIntakeForm = $('#plan-intake-form');
+  if (planIntakeForm) planIntakeForm.addEventListener('submit', event => {
+    event.preventDefault();
+    const values = new FormData(planIntakeForm);
+    const intakeText = 'SOLICITUD DE PROPUESTA — EffiTech AI\n\n' +
+      'Plan de interés: ' + values.get('plan') + '\n' +
+      'Nombre: ' + values.get('name') + '\nEmpresa: ' + values.get('company') + '\nEmail: ' + values.get('email') + '\n' +
+      'Qué quiere automatizar: ' + values.get('goal') + '\nHerramientas: ' + (values.get('tools') || 'No especificadas') + '\n' +
+      'Momento para empezar: ' + values.get('timing') + '\n\nAutorizo a EffiTech AI a contactarme para preparar una propuesta.';
+    const subject = 'Propuesta ' + values.get('plan') + ' — ' + values.get('company');
+    $('#request-preview').textContent = intakeText;
+    $('#request-mail').href = 'mailto:' + C.email + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(intakeText);
+    $('#request-gmail').href = 'https://mail.google.com/mail/?view=cm&fs=1&to=' + encodeURIComponent(C.email) + '&su=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(intakeText);
+    $('#request-wa').href = wa(intakeText);
+    $('#plan-intake-dialog').close(); showDialog($('#request-dialog')); track('plan_intake_complete', { plan: values.get('plan') });
+  });
   form.addEventListener('submit', async event => {
     event.preventDefault();
     if (submitting) return;
