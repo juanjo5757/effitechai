@@ -289,6 +289,47 @@
   }
   const quote = $('#quote-dialog');
   let quotePlan;
+  let selectedPlanCard;
+  function showQuoteReview(reviewing) {
+    $('#quote-editor').hidden = reviewing;
+    $('#quote-review').hidden = !reviewing;
+    $('#quote-next').hidden = reviewing;
+    $('#quote-pay').hidden = !reviewing;
+    quote.scrollTop = 0;
+  }
+  $('#quote-next').addEventListener('click', () => {
+    if (!checkoutQuote) return;
+    showQuoteReview(true);
+    $('#review-title').focus();
+  });
+  $('#quote-edit').addEventListener('click', () => {
+    showQuoteReview(false);
+    $('#quote-integrations').focus();
+  });
+  const demoStart = $('#demo-start'), demoArea = $('#demo-area'), demoZone = $('#demo-zone');
+  const demoVisit = $('#demo-visit'), demoReset = $('#demo-reset'), demoSummary = $('#demo-summary');
+  function resetDemo() {
+    demoStart.hidden = false;
+    demoArea.hidden = demoReset.hidden = demoVisit.hidden = true;
+    demoZone.value = '';
+    liveText.delete(demoSummary);
+    demoSummary.textContent = '';
+  }
+  demoStart.addEventListener('click', () => {
+    demoStart.hidden = true;
+    demoArea.hidden = demoReset.hidden = false;
+    demoZone.focus();
+  });
+  demoZone.addEventListener('change', () => {
+    demoVisit.hidden = !demoZone.value;
+    writeText(demoSummary, demoZone.value ? 'Ficha de ejemplo · Interés: apartamento en {zone}. Etapa: busca visita.' : '', {zone:demoZone.value});
+  });
+  demoVisit.addEventListener('click', () => {
+    writeText(demoSummary, 'Visita propuesta en {zone} para el sábado a las 10:00. La ficha pasa a seguimiento del asesor. Es una simulación sin reserva real.', {zone:demoZone.value});
+    demoVisit.hidden = true;
+    demoReset.focus();
+  });
+  demoReset.addEventListener('click', () => { resetDemo(); demoStart.focus(); });
   const toolItems = $('#quote-items');
   function addQuoteTool() {
     const row = document.createElement('fieldset');
@@ -333,7 +374,7 @@
   }
   let checkoutQuote = '', checkoutBusy = false, checkoutSession;
   $('#quote-pay').addEventListener('click', async () => {
-    if (!checkoutQuote || checkoutBusy) return;
+    if (!checkoutQuote || checkoutBusy || $('#quote-review').hidden) return;
     const version = checkoutQuote;
     const button = $('#quote-pay'), status = $('#quote-pay-status');
     checkoutBusy = true;
@@ -348,7 +389,7 @@
       const response = await fetch('/quote-checkout', {method:'POST', headers:{'Content-Type':'application/json'},
         body:JSON.stringify({...JSON.parse(version), session:checkoutSession})});
       const result = await response.json();
-      if (version !== checkoutQuote || !quote.open) return;
+      if (version !== checkoutQuote || !quote.open || $('#quote-review').hidden) return;
       if (!response.ok) {
         const message = {pending:'El enlace está pendiente de confirmación. Vuelve a intentarlo en unos minutos.',
           expired:'La cotización venció. Contacta con EffiTech AI para revisar el pago.',
@@ -399,6 +440,20 @@
     $('#quote-due').textContent = valid ? money(deposit / 100) : '—';
     $('#quote-pay').disabled = !valid || checkoutBusy || location.protocol === 'file:';
     $('#quote-pay-status').textContent = location.protocol === 'file:' ? tr('El pago se habilita al abrir la web en Cloudflare.') : '';
+    $('#quote-next').disabled = !valid;
+    $('#quote-balance').textContent = valid ? money((total - deposit) / 100) : '—';
+    $('#settlement-note').textContent = tr(lang === 'en'
+      ? 'La cotización está en USD. Bold muestra el importe y la moneda de cobro antes de pagar.'
+      : 'La cotización y el anticipo están en pesos colombianos (COP).');
+    const selections = ['integrations','rules','support'].map(id => $('#quote-' + id).selectedOptions[0].textContent);
+    $('#review-scope').textContent = [$('#quote-plan').textContent, ...selections,
+      tr('{months} mes(es)').replace('{months}', months),
+      tools.length ? tools.map(tool => tool.name).join(', ') : tr('Ninguna herramienta adicional')].join(' · ');
+    $('#review-includes').replaceChildren(...$$('.checklist li', selectedPlanCard).map(item => {
+      const li = document.createElement('li');
+      li.textContent = item.textContent;
+      return li;
+    }));
     const savings = months * (advancedSaving + termSaving);
     const savingsLabel = $('#quote-savings');
     savingsLabel.hidden = !valid || savings === 0;
@@ -426,6 +481,8 @@
   });
   quote.addEventListener('input', renderQuote);
   $$('[data-plan]').forEach(button => button.addEventListener('click', () => {
+    selectedPlanCard = button.closest('article');
+    showQuoteReview(false);
     const plan = button.dataset.plan;
     quotePlan = { Starter: 'starter', Growth: 'growth', 'AI System': 'ai' }[plan];
     $('#quote-plan').textContent = plan;

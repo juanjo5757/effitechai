@@ -44,7 +44,8 @@ export async function onRequestPost({request, env}) {
     const response = await fetch('https://integrations.api.bold.co/online/link/v1', {
       method:'POST', headers:{Authorization:'x-api-key ' + env.BOLD_API_KEY,'Content-Type':'application/json'},
       body:JSON.stringify({amount_type:'CLOSE',amount:{currency:price.currency,total_amount:price.deposit/100,tip_amount:0},
-        reference,description:'EffiTech AI - Anticipo 50% - ' + q.plan,expiration_date:expires*1e6})
+        reference,callback_url:new URL('/pago?ref=' + key + '&lang=' + q.lang, request.url).href,
+        description:'EffiTech AI - Anticipo 50% - ' + q.plan,expiration_date:expires*1e6})
     });
     if (!response.ok) {
       // A definite validation rejection did not create a link. Ambiguous responses keep their claim.
