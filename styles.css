@@ -75,5 +75,4 @@ html[data-document-language] .legal-page article[hidden]{display:none}
 html[data-document-language] .legal-page article:not([hidden]){display:block}
 
 .form-fields{border:0;padding:0;margin:0;min-width:0}
-.plan-intake-form .form-fields:not([hidden]){display:grid;gap:.85rem}
 .form-fallback a{color:#c6bcff}

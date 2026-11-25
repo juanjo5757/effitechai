@@ -287,17 +287,158 @@
     const privacy = $('#privacy-dialog');
     writeText(privacy.querySelectorAll('p')[1], 'Al enviar el formulario, tus datos se transmiten a EffiTech AI para atender tu solicitud. Puedes solicitar información sobre su tratamiento en nuestro correo de contacto.');
   }
-  const planIntakeForm = $('#plan-intake-form');
-  $$('[data-plan]').forEach(link => link.addEventListener('click', event => {
-    event.preventDefault();
-    planIntakeForm.reset();
-    for (const field of planIntakeForm.querySelectorAll('[aria-invalid]')) {
-      field.setCustomValidity('');
-      field.removeAttribute('aria-invalid');
+  const quote = $('#quote-dialog');
+  let quotePlan;
+  const toolItems = $('#quote-items');
+  function addQuoteTool() {
+    const row = document.createElement('fieldset');
+    row.className = 'quote-item';
+    const fields = [
+      ['name', 'Herramienta o servicio', 'text', '', ''],
+      ['seats', 'Licencias o usuarios', 'number', '1', '1'],
+      ['license', 'Precio mensual por licencia', 'number', '0.01', '0'],
+      ['units', 'Unidades facturables al mes', 'number', 'any', '0'],
+      ['rate', 'Precio por unidad', 'number', 'any', '0'],
+      ['setup', 'Cargo inicial del proveedor', 'number', '0.01', '0']
+    ];
+    for (const [key, title, type, step, initial] of fields) {
+      const label = document.createElement('label');
+      label.textContent = tr(title);
+      const input = document.createElement('input');
+      input.name = key;
+      input.type = type;
+      input.required = true;
+      if (type === 'number') {
+        input.min = '0';
+        input.step = step;
+        input.value = initial;
+      } else {
+        input.placeholder = 'WhatsApp, Make, CRM…';
+      }
+      label.append(input);
+      row.append(label);
     }
-    planIntakeForm.elements.plan.value = link.dataset.plan;
-    track('plan_select', { plan: link.dataset.plan });
-    showDialog($('#plan-intake-dialog'));
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'text-link';
+    remove.textContent = tr('Quitar herramienta');
+    remove.addEventListener('click', () => {
+      row.remove();
+      if (!toolItems.children.length) $('#quote-tool-choice').value = '';
+      renderQuote();
+      $('#quote-tool-choice').focus();
+    });
+    row.append(remove);
+    toolItems.append(row);
+  }
+  let checkoutQuote = '', checkoutBusy = false, checkoutSession;
+  $('#quote-pay').addEventListener('click', async () => {
+    if (!checkoutQuote || checkoutBusy) return;
+    const version = checkoutQuote;
+    const button = $('#quote-pay'), status = $('#quote-pay-status');
+    checkoutBusy = true;
+    button.disabled = true;
+    status.textContent = tr('Preparando el enlace de pago…');
+    try {
+      if (!checkoutSession) {
+        try { checkoutSession = sessionStorage.getItem('effitech_checkout'); } catch {}
+        if (!checkoutSession) checkoutSession = crypto.randomUUID();
+        try { sessionStorage.setItem('effitech_checkout', checkoutSession); } catch {}
+      }
+      const response = await fetch('/quote-checkout', {method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({...JSON.parse(version), session:checkoutSession})});
+      const result = await response.json();
+      if (version !== checkoutQuote || !quote.open) return;
+      if (!response.ok) {
+        const message = {pending:'El enlace está pendiente de confirmación. Vuelve a intentarlo en unos minutos.',
+          expired:'La cotización venció. Contacta con EffiTech AI para revisar el pago.',
+          quote_changed:'El precio cambió. Recarga la página para revisar la cotización.'}[result.error];
+        throw new Error(message || '');
+      }
+      const url = new URL(result.url);
+      if (url.origin !== 'https://checkout.bold.co') throw new Error();
+      location.assign(url.href);
+    } catch (error) {
+      if (version === checkoutQuote) status.textContent = tr(Object.hasOwn(window.EFFITECH_EN, error.message)
+        ? error.message : 'No se pudo abrir el pago. Inténtalo más tarde.');
+    } finally {
+      checkoutBusy = false;
+      button.disabled = !checkoutQuote || location.protocol === 'file:';
+    }
+  });
+  function renderQuote() {
+    if (!quotePlan) return;
+    const choice = $('#quote-tool-choice').value;
+    const withTools = choice === 'yes';
+    $('#quote-tools').hidden = !withTools;
+    if (withTools && !toolItems.children.length) addQuoteTool();
+    $('#quote-currency').textContent = lang === 'en' ? tr('Importes en dólares estadounidenses (USD).') : 'Importes en pesos colombianos (COP).';
+    const months = $('#quote-months').valueAsNumber;
+    const other = $('#quote-other');
+    const tools = [];
+    let valid = Boolean(choice) && other.validity.valid && $('#quote-months').validity.valid;
+    if (withTools) {
+      for (const row of toolItems.children) {
+        const f = row.elements;
+        valid = valid && f.name.value.trim() !== '' && [...row.querySelectorAll('input')].every(input => input.validity.valid);
+        tools.push({name:f.name.value.trim(), seats:f.seats.valueAsNumber, license:f.license.valueAsNumber,
+          units:f.units.valueAsNumber, rate:f.rate.valueAsNumber, setup:f.setup.valueAsNumber});
+      }
+    }
+    const options = {lang, plan:quotePlan, connections:Number($('#quote-integrations').value),
+      rules:Number($('#quote-rules').value), support:Number($('#quote-support').value), months, other:other.valueAsNumber, tools};
+    const {base, connections, rules, setup, maintenance, once, licenses, usage, advancedSaving, termSaving,
+      monthly, total, deposit} = globalThis.EFFITECH_PRICING.calculate(options);
+    const discounts = C.maintenanceDiscounts;
+    const tiers = discounts.terms.map(tier => tr('{months}+ meses: {rate} %')
+      .replace('{months}', tier.months).replace('{rate}', tier.percent));
+    $('#quote-discount-terms').textContent = tr('El mantenimiento avanzado tiene un {rate} % de descuento. Por duración se aplica un descuento adicional sobre el mantenimiento restante: {tiers}.')
+      .replace('{rate}', discounts.advancedPercent).replace('{tiers}', tiers.join(' · '));
+    valid = valid && Number.isSafeInteger(total);
+    checkoutQuote = valid ? JSON.stringify({quote:options,deposit,total}) : '';
+    $('#quote-due').textContent = valid ? money(deposit / 100) : '—';
+    $('#quote-pay').disabled = !valid || checkoutBusy || location.protocol === 'file:';
+    $('#quote-pay-status').textContent = location.protocol === 'file:' ? tr('El pago se habilita al abrir la web en Cloudflare.') : '';
+    const savings = months * (advancedSaving + termSaving);
+    const savingsLabel = $('#quote-savings');
+    savingsLabel.hidden = !valid || savings === 0;
+    savingsLabel.textContent = valid && savings > 0
+      ? tr('Ahorras {amount} en este período.').replace('{amount}', money(savings / 100)) : '';
+    for (const [selector, saving] of [['#quote-advanced-saving', advancedSaving], ['#quote-term-saving', termSaving]]) {
+      $(selector).textContent = valid ? (saving ? '−' : '') + money(saving / 100) : '—';
+    }
+    $('#quote-base').textContent = money(base);
+    $('#quote-connection-cost').textContent = money(connections);
+    $('#quote-rule-cost').textContent = money(rules);
+    $('#quote-setup').textContent = money(setup);
+    $('#quote-maintenance').textContent = money(maintenance);
+    for (const [id, value] of Object.entries({once, licenses, usage, monthly, grand: total})) {
+      $('#quote-' + id).textContent = valid ? money(value / 100) : '—';
+    }
+    $('#quote-note').textContent = valid
+      ? tr('Incluye la implementación, los cargos únicos y {months} mes(es) de costos recurrentes.').replace('{months}', months)
+      : tr('Completa los campos de cada herramienta y revisa los importes y el período.');
+  }
+  $('#quote-add').addEventListener('click', () => {
+    addQuoteTool();
+    renderQuote();
+    toolItems.lastElementChild.querySelector('input').focus();
+  });
+  quote.addEventListener('input', renderQuote);
+  $$('[data-plan]').forEach(button => button.addEventListener('click', () => {
+    const plan = button.dataset.plan;
+    quotePlan = { Starter: 'starter', Growth: 'growth', 'AI System': 'ai' }[plan];
+    $('#quote-plan').textContent = plan;
+    $('#quote-integrations').selectedIndex = 0;
+    $('#quote-rules').selectedIndex = 0;
+    $('#quote-support').value = '0';
+    $('#quote-tool-choice').value = '';
+    $('#quote-other').value = '0';
+    $('#quote-months').value = '1';
+    toolItems.replaceChildren();
+    renderQuote();
+    track('plan_select', { plan });
+    showDialog(quote);
   }));
   function validateField(input) {
     input.setCustomValidity('');
@@ -356,23 +497,6 @@
     track('audit_channel_open', { channel: id });
     writeText($('#copy-status'), 'Completa el envío en el servicio que abriste. Esta página no puede confirmar su recepción.');
   }));
-  planIntakeForm.addEventListener('submit', event => {
-    event.preventDefault();
-    const fields = [...planIntakeForm.elements].filter(field => field.required);
-    if (!fields.map(validateField).every(Boolean)) { planIntakeForm.reportValidity(); return; }
-    const values = new FormData(planIntakeForm);
-    const field = key => values.get(key).trim();
-    const lines = [
-      tr('SOLICITUD DE PROPUESTA') + ' — EffiTech AI', '',
-      tr('Plan de interés') + ': ' + field('plan'), tr('Nombre') + ': ' + field('name'),
-      tr('Empresa') + ': ' + field('company'), 'Email: ' + field('email'),
-      tr('Objetivo') + ': ' + field('goal'), tr('Herramientas') + ': ' + (field('tools') || tr('Sin especificar')),
-      tr('Plazo') + ': ' + tr(field('timing')), '', tr('Autorizo a EffiTech AI a contactarme para preparar una propuesta.')
-    ];
-    $('#plan-intake-dialog').close();
-    openRequest(tr('Propuesta') + ' ' + field('plan') + ' — ' + field('company'), lines.join('\n'));
-    track('plan_intake_complete', { plan: field('plan') });
-  });
   form.addEventListener('submit', async event => {
     event.preventDefault();
     if (submitting) return;
@@ -449,15 +573,17 @@
     track('calculator_complete', { industry: data.get('industry') });
   });
 
+  function money(value, includeCurrency = true) {
+    const currency = lang === 'es' ? 'COP ' : 'US$';
+    return (includeCurrency ? currency : '') + new Intl.NumberFormat(lang === 'es' ? 'es-CO' : 'en-US', { maximumFractionDigits: 2 }).format(value);
+  }
   function renderPrices() {
     const prices = C.prices[lang];
-    const formatter = new Intl.NumberFormat(lang === 'es' ? 'es-CO' : 'en-US');
     for (const el of $$('[data-price]')) {
       const plan = el.dataset.price;
-      const amounts = prices[plan].map(value => formatter.format(value));
-      const currency = lang === 'es' ? 'COP ' : 'US$';
+      const amounts = prices[plan].map((value, index) => money(value, index === 0));
       const prefix = amounts.length === 1 ? tr('Desde') + ' ' : '';
-      el.textContent = prefix + currency + amounts.join('–') + (plan === 'maintenance' ? tr('/mes') : '');
+      el.textContent = prefix + amounts.join('–') + (plan === 'maintenance' ? tr('/mes') : '');
     }
   }
   function applyLanguage(next) {
@@ -482,6 +608,7 @@
     for (const field of $$('form [aria-invalid="true"]')) validateField(field);
     document.querySelector('[property="og:locale"]').content = lang === 'es' ? 'es_CO' : 'en_US';
     renderPrices();
+    renderQuote();
     renderContactLinks();
     moveIndicator(true);
     try { localStorage.setItem('meloia_lang', lang); } catch {}
@@ -496,8 +623,8 @@
     url.searchParams.set('lang', lang);
     if (url.protocol !== 'file:') history.replaceState(null, '', url);
   });
-  // Only expose personal-data fields once all three submit handlers are installed.
-  for (const readyForm of [form, calculatorForm, planIntakeForm]) {
+  // Only expose personal-data fields once both submit handlers are installed.
+  for (const readyForm of [form, calculatorForm]) {
     const fields = readyForm.querySelector('.form-fields');
     fields.disabled = false;
     fields.hidden = false;

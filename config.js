@@ -1,5 +1,13 @@
 /* Configuración pública. Nunca incluyas contraseñas o claves privadas aquí. */
-window.EFFITECH_CONFIG = Object.freeze({
+globalThis.EFFITECH_CONFIG = Object.freeze({
+  maintenanceDiscounts: {
+    advancedPercent: 10,
+    terms: [
+      { months: 3, percent: 5 },
+      { months: 6, percent: 8 },
+      { months: 12, percent: 12 }
+    ]
+  },
   prices: {
     es: { starter: [1260000, 2520000], growth: [3360000, 6300000], ai: [8400000], maintenance: [420000, 2100000] },
     en: { starter: [300, 600], growth: [800, 1500], ai: [2000], maintenance: [100, 500] }
